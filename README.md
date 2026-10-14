@@ -24,7 +24,7 @@ bash scripts/install.sh --client codex
 
 ## 安装与使用
 
-1. 打开 Apple Silicon（M 系列 Mac）的 ARM 安装包，将 `XIPU MCP.app` 放入“应用程序”，打开 App。
+1. 从 [GitHub Release](https://github.com/xyx-chn/XIPU-MCP/releases/tag/v0.1.1) 下载 Apple Silicon（M 系列 Mac）的 ARM 测试安装包，将 `XIPU MCP.app` 放入“应用程序”，打开 App。
 2. 在“账户与邮箱”填写学校账户。希望自动取码时，再配置邮箱服务器、认证信息、收码地址及筛选规则。
 3. 保存设置，测试邮箱连接，点击“连接学校”。自动流程未完成时会打开学校原始登录窗口，供人工操作。
 4. 在“AI 接入”生成配置，复制到支持 stdio 的 MCP 客户端。发行包内置 Node，使用者不需要开发工具。
