@@ -1,0 +1,10 @@
+import { build } from 'esbuild';
+import { mkdir, copyFile } from 'node:fs/promises';
+await mkdir('build/ui', { recursive: true });
+await build({ entryPoints: ['src/main.ts'], outfile: 'build/main.cjs', bundle: true, platform: 'node', format: 'cjs', packages: 'external', sourcemap: false });
+await build({ entryPoints: ['src/preload.ts'], outfile: 'build/preload.cjs', bundle: true, platform: 'node', format: 'cjs', external: ['electron'] });
+await build({ entryPoints: ['src/documents-worker.ts'], outfile: 'build/documents-worker.cjs', bundle: true, platform: 'node', format: 'cjs', packages: 'external' });
+await build({ entryPoints: ['src/bridge.ts'], outfile: 'build/bridge.cjs', bundle: true, platform: 'node', format: 'cjs', target: 'node22' });
+await build({ entryPoints: ['src/ui/app.ts'], outfile: 'build/ui/app.js', bundle: true, platform: 'browser' });
+await copyFile('src/ui/index.html', 'build/ui/index.html');
+await copyFile('src/ui/style.css', 'build/ui/style.css');

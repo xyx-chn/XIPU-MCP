@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+XIPU_RESOURCES=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "$XIPU_RESOURCES/node" "$XIPU_RESOURCES/bridge.cjs" "$@"

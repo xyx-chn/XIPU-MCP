@@ -1,0 +1,86 @@
+{
+  "name": "xipu-mcp",
+  "version": "0.1.1",
+  "private": true,
+  "author": "XIPU MCP contributors",
+  "license": "MIT",
+  "description": "Local Moodle MCP bridge with private IMAP/POP3 verification",
+  "main": "build/main.cjs",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/test.mjs",
+    "start": "npm run build && electron .",
+    "runtime": "node scripts/runtime.mjs",
+    "electron-runtime": "node scripts/electron-runtime.mjs",
+    "package:arm64": "npm run build && npm run runtime -- arm64 && npm run electron-runtime -- arm64 && electron-builder --mac dmg --arm64 --config.electronDist=runtime/electron/arm64",
+    "package": "npm run package:arm64"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.3.1",
+    "cheerio": "^1.2.0",
+    "fast-xml-parser": "^5.3.0",
+    "fflate": "^0.8.2",
+    "imapflow": "2.4.0",
+    "mailparser": "^3.9.0",
+    "pdfjs-dist": "^6.4.299",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/mailparser": "^3.4.6",
+    "@types/node": "^24.0.0",
+    "electron": "44.7.2",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  },
+  "build": {
+    "appId": "edu.xipu.mcp",
+    "productName": "XIPU MCP",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "build/main.cjs",
+      "build/preload.cjs",
+      "build/documents-worker.cjs",
+      "build/ui/**",
+      "package.json"
+    ],
+    "asar": true,
+    "extraResources": [
+      {
+        "from": "runtime/${arch}/node",
+        "to": "node"
+      },
+      {
+        "from": "runtime/${arch}/LICENSE",
+        "to": "node-LICENSE"
+      },
+      {
+        "from": "build/bridge.cjs",
+        "to": "bridge.cjs"
+      },
+      {
+        "from": "scripts/xipu-mcp",
+        "to": "xipu-mcp"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.education",
+      "icon": "assets/icon.icns",
+      "minimumSystemVersion": "13.0",
+      "hardenedRuntime": true,
+      "entitlements": "scripts/entitlements.mac.plist",
+      "entitlementsInherit": "scripts/entitlements.mac.plist",
+      "target": [
+        "dmg",
+        "dir"
+      ]
+    },
+    "dmg": {
+      "title": "XIPU MCP ${version}"
+    }
+  }
+}

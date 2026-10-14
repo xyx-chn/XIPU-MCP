@@ -1,0 +1,26 @@
+node_modules/
+build/
+dist/
+runtime/
+.cache/
+*.log
+.env*
+!.env.example
+.DS_Store
+# Personal integration records stay local, even when anonymized.
+/VALIDATION.md
+# Local App state, downloaded course files and credentials must stay private.
+secrets.enc
+settings.json
+jobs.json
+*.xipu.json
+ipc.token
+ipc.sock
+bridge.token
+bridge.sock
+*.p12
+*.pfx
+*.key
+*.mobileprovision
+*.dmg
+*.app/
