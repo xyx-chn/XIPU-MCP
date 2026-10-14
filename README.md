@@ -1,6 +1,6 @@
 # XIPU MCP
 
-连接西交利物浦大学 Learning Mall Core（Moodle）的本机 macOS App。AI 通过标准 MCP stdio 查询课程、下载附件和查看截止时间。学校密码、邮箱配置、验证码和邮件正文不属于 MCP 接口。
+连接西交利物浦大学 Learning Mall Core（Moodle）的本机 macOS App。AI 通过标准 MCP stdio 查询课程、下载附件和查看截止时间。
 
 ## 一句话让 AI 安装
 
