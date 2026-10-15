@@ -12,8 +12,12 @@ export const MailConfig = z.object({
   codeLength: z.number().int().min(4).max(8).default(6),
 });
 export type MailSettings = z.infer<typeof MailConfig>;
+export const WidgetSettingsSchema = z.object({
+  enabled: z.boolean().default(false), launchAtLogin: z.boolean().default(true),
+});
 export const SettingsSchema = z.object({
   username: z.string().default(''), downloadDirectory: z.string().min(1), mail: MailConfig,
+  widgets: WidgetSettingsSchema.default({enabled:false,launchAtLogin:true}),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 export type Secrets = { schoolPassword?: string; mailPassword?: string; cookies?: Electron.Cookie[] };

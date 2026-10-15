@@ -17,6 +17,18 @@ async function fixture() {
   return { root, source, destination, copy: (from: string, to: string) => cp(from, to, { recursive: true }), running: () => false };
 }
 
+async function addWidget(source: string) {
+  for (const file of [
+    'Contents/PlugIns/XIPUDeadlines.appex/Contents/MacOS/XIPUDeadlines',
+    'Contents/PlugIns/XIPUDeadlines.appex/Contents/Info.plist',
+    'Contents/Resources/widget-bridge.node',
+    'Contents/Frameworks/libXIPUWidgetBridge.dylib',
+  ]) {
+    await mkdir(path.dirname(path.join(source, file)), { recursive: true });
+    await writeFile(path.join(source, file), 'widget fixture', { mode: 0o755 });
+  }
+}
+
 test('App install copies entrypoints and replaces only its destination', async () => {
   const f = await fixture();
   try {
@@ -61,5 +73,47 @@ test('a fresh installation stops when another copy owns the running App', async 
   try {
     await assert.rejects(installApp(f.source, f.destination, { ...f, running: () => true }), /running/);
     await assert.rejects(readFile(path.join(f.destination, 'Contents/Resources/node')), { code: 'ENOENT' });
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test('required widget resources survive the atomic App installation', async () => {
+  const f = await fixture();
+  try {
+    await addWidget(f.source);
+    await installApp(f.source, f.destination, { ...f, requireWidget: true });
+    assert.equal(await readFile(path.join(f.destination, 'Contents/Resources/widget-bridge.node'), 'utf8'), 'widget fixture');
+    assert.equal(await readFile(path.join(f.destination, 'Contents/PlugIns/XIPUDeadlines.appex/Contents/MacOS/XIPUDeadlines'), 'utf8'), 'widget fixture');
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test('a required widget missing from the build leaves the installed App intact', async () => {
+  const f = await fixture();
+  try {
+    await mkdir(f.destination, { recursive: true });
+    await writeFile(path.join(f.destination, 'old'), 'old app');
+    await assert.rejects(installApp(f.source, f.destination, { ...f, requireWidget: true }), /widget extension/);
+    await addWidget(f.source);
+    await rm(path.join(f.source, 'Contents/Resources/widget-bridge.node'));
+    await assert.rejects(installApp(f.source, f.destination, { ...f, requireWidget: true }), /widget resource/);
+    assert.equal(await readFile(path.join(f.destination, 'old'), 'utf8'), 'old app');
+    assert.deepEqual(await readdir(path.dirname(f.destination)), ['XIPU MCP.app']);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test('a copy that loses the widget cannot replace the installed App', async () => {
+  const f = await fixture();
+  try {
+    await addWidget(f.source);
+    await mkdir(f.destination, { recursive: true });
+    await writeFile(path.join(f.destination, 'old'), 'old app');
+    await assert.rejects(installApp(f.source, f.destination, {
+      ...f, requireWidget: true,
+      copy: async (from: string, stage: string) => {
+        await f.copy(from, stage);
+        await rm(path.join(stage, 'Contents/Frameworks/libXIPUWidgetBridge.dylib'));
+      },
+    }), /widget resource/);
+    assert.equal(await readFile(path.join(f.destination, 'old'), 'utf8'), 'old app');
+    assert.deepEqual(await readdir(path.dirname(f.destination)), ['XIPU MCP.app']);
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });

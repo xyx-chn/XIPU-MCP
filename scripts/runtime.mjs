@@ -16,11 +16,11 @@ const choice=process.argv[2]??process.arch;const architectures=choice==='all'?['
 for(const arch of architectures){
   if(!['arm64','x64'].includes(arch))throw new Error('Supported macOS architectures: arm64, x64');
   const folder=path.resolve('runtime',arch);await mkdir(folder,{recursive:true});
-  try{const metadata=JSON.parse(await readFile(path.join(folder,'metadata.json'),'utf8'));if(metadata.version===version){await readFile(path.join(folder,'node'));await readFile(path.join(folder,'LICENSE'));console.log(`Node ${version} ${arch} already bundled`);continue;}}catch{}
+  try{const metadata=JSON.parse(await readFile(path.join(folder,'metadata.json'),'utf8'));if(metadata.version===version){await readFile(path.join(folder,'node'));await readFile(path.join(folder,'LICENSE'));await readFile(path.join(folder,'include/node/node_api.h'));console.log(`Node ${version} ${arch} and native headers already bundled`);continue;}}catch{}
   hashes??=(await get(`https://nodejs.org/dist/${version}/SHASUMS256.txt`)).toString();
   const filename=`node-${version}-darwin-${arch}.tar.gz`;const expected=hashes.split('\n').find(line=>line.endsWith('  '+filename))?.split(/\s+/)[0];if(!expected)throw new Error('Runtime checksum missing');
   const bytes=await get(`https://nodejs.org/dist/${version}/${filename}`);if(createHash('sha256').update(bytes).digest('hex')!==expected)throw new Error('Node runtime checksum mismatch');
-  const archive=path.join(folder,filename);await writeFile(archive,bytes);execFileSync('/usr/bin/tar',['-xzf',archive,'--strip-components=2','-C',folder,`node-${version}-darwin-${arch}/bin/node`]);execFileSync('/usr/bin/tar',['-xzf',archive,'--strip-components=1','-C',folder,`node-${version}-darwin-${arch}/LICENSE`]);await chmod(path.join(folder,'node'),0o755);await rm(archive);
+  const archive=path.join(folder,filename);await writeFile(archive,bytes);execFileSync('/usr/bin/tar',['-xzf',archive,'--strip-components=2','-C',folder,`node-${version}-darwin-${arch}/bin/node`]);execFileSync('/usr/bin/tar',['-xzf',archive,'--strip-components=1','-C',folder,`node-${version}-darwin-${arch}/LICENSE`]);execFileSync('/usr/bin/tar',['-xzf',archive,'--strip-components=1','-C',folder,`node-${version}-darwin-${arch}/include/node`]);await chmod(path.join(folder,'node'),0o755);await rm(archive);
   await writeFile(path.join(folder,'metadata.json'),JSON.stringify({version,arch,archiveSha256:expected}));console.log(`Bundled verified Node ${version} ${arch}`);
 }
 await chmod('scripts/xipu-mcp',0o755);

@@ -7,6 +7,7 @@ usage() {
   cat <<'HELP'
 Usage: bash scripts/install.sh --client codex|claude-desktop|cursor|config-only [options]
   --app-dir DIR    Install in DIR (default: ~/Applications; no sudo).
+  --with-widget    Also compile the macOS 14+ DDL desktop widget (full Xcode required).
   --no-open        Do not open the account settings window after installation.
   --help          Show this help.
 
@@ -20,6 +21,7 @@ HELP
 XIPU_CLIENT=''
 XIPU_APP_DIR="${HOME}/Applications"
 XIPU_OPEN=1
+XIPU_WITH_WIDGET=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --client|--app-dir)
@@ -30,6 +32,7 @@ while [ "$#" -gt 0 ]; do
       esac
       shift 2 ;;
     --no-open) XIPU_OPEN=0; shift ;;
+    --with-widget) XIPU_WITH_WIDGET=1; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -43,6 +46,13 @@ esac
 }
 XIPU_MAC_MAJOR=$(/usr/bin/sw_vers -productVersion | cut -d. -f1)
 [ "$XIPU_MAC_MAJOR" -ge 13 ] || { echo 'Requires macOS 13 or newer.' >&2; exit 1; }
+if [ "$XIPU_WITH_WIDGET" -eq 1 ]; then
+  [ "$XIPU_MAC_MAJOR" -ge 14 ] || { echo '--with-widget requires macOS 14 or newer; omit it for the macOS 13 App.' >&2; exit 1; }
+  if ! /usr/bin/xcodebuild -version >/dev/null 2>&1; then
+    echo '--with-widget requires full Xcode. Install/open Xcode, complete its first-launch setup and select its developer directory. The installer does not accept licenses or install Xcode.' >&2
+    exit 1
+  fi
+fi
 case "$XIPU_APP_DIR" in
   /*) ;;
   *) echo '--app-dir must be an absolute path.' >&2; exit 2 ;;
@@ -78,6 +88,7 @@ rm -rf "$XIPU_TOOLCHAIN"
 /usr/bin/tar -xzf "$XIPU_ARCHIVE" -C "$XIPU_CACHE"
 export PATH="${XIPU_TOOLCHAIN}/bin:${PATH}"
 "${XIPU_TOOLCHAIN}/bin/node" -e 'if(process.arch!=="arm64"||process.version!=="v22.23.3")process.exit(1)'
+if [ "$XIPU_WITH_WIDGET" -eq 1 ]; then node scripts/build-widget.mjs --check --arch arm64; fi
 node scripts/install-app.mjs --check-running
 
 echo 'Installing locked dependencies and running checks…'
@@ -103,10 +114,23 @@ await writeFile('runtime/arm64/metadata.json',JSON.stringify({version:'v22.23.3'
 NODE
 npm run electron-runtime -- arm64
 # Installing .app directly avoids requiring DMG creation tools or a signing key.
-CSC_IDENTITY_AUTO_DISCOVERY=false npm exec -- electron-builder --mac dir --arm64 --config.electronDist=runtime/electron/arm64
+XIPU_BUILT_APP="${XIPU_ROOT}/dist/mac-arm64/XIPU MCP.app"
+if [ "$XIPU_WITH_WIDGET" -eq 1 ]; then
+  node scripts/build-widget.mjs --arch arm64
+  XIPU_WIDGET_SMOKE=0 XIPU_WIDGET_OUTPUT="${XIPU_ROOT}/dist/widget-local" CSC_IDENTITY_AUTO_DISCOVERY=false \
+    npm exec -- electron-builder --mac dir --arm64 \
+    --config scripts/widget-local.config.cjs --config.electronDist=runtime/electron/arm64
+  XIPU_BUILT_APP="${XIPU_ROOT}/dist/widget-local/mac-arm64/XIPU MCP.app"
+else
+  CSC_IDENTITY_AUTO_DISCOVERY=false npm exec -- electron-builder --mac dir --arm64 --config.electronDist=runtime/electron/arm64
+fi
 
 XIPU_INSTALLED="${XIPU_APP_DIR%/}/XIPU MCP.app"
-node scripts/install-app.mjs --source "${XIPU_ROOT}/dist/mac-arm64/XIPU MCP.app" --destination "$XIPU_INSTALLED"
+if [ "$XIPU_WITH_WIDGET" -eq 1 ]; then
+  node scripts/install-app.mjs --source "$XIPU_BUILT_APP" --destination "$XIPU_INSTALLED" --require-widget
+else
+  node scripts/install-app.mjs --source "$XIPU_BUILT_APP" --destination "$XIPU_INSTALLED"
+fi
 node scripts/smoke-mcp.mjs "${XIPU_INSTALLED}/Contents/Resources/xipu-mcp"
 node scripts/setup-mcp.mjs --client "$XIPU_CLIENT" --app "$XIPU_INSTALLED" --config-output "${XIPU_ROOT}/dist/mcp-config.json"
 if [ "$XIPU_OPEN" -eq 1 ]; then /usr/bin/open "$XIPU_INSTALLED"; fi
@@ -117,3 +141,6 @@ else
   echo 'MCP client configured. Reload your client if its tools are not visible.'
 fi
 echo 'First use: enter school/mail settings yourself in the App, then connect school.'
+if [ "$XIPU_WITH_WIDGET" -eq 1 ]; then
+  echo 'DDL widget compiled locally. In the App open 截止时间 and enable the widget; then right-click the desktop, choose 编辑小组件 and find XIPU 截止时间.'
+fi

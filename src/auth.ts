@@ -54,6 +54,21 @@ export class AuthService {
     } catch (e) {this.diagnostic={stage:e instanceof AppError?e.code:'network_failure'};return false; }
   }
   invalidate() { this.lastChecked = 0; this.set('signed_out','学校会话已失效。'); }
+  async ensureBackground() {
+    if (this.status.state !== 'authenticated' || this.pending) throw new AppError('AUTH_REQUIRED','请在 App 中连接学校后刷新截止时间。');
+    if (Date.now()-this.lastChecked < 60_000) return;
+    const status = this.status;
+    const username = this.store.settings.username;
+    const authenticated = await this.probe();
+    if (status !== this.status || username !== this.store.settings.username || this.status.state !== 'authenticated' || this.pending) {
+      // A newer check may have authenticated the same account while this probe was pending.
+      if (username === this.store.settings.username && this.status.state === 'authenticated' && !this.pending && Date.now()-this.lastChecked < 60_000) return;
+      throw new AppError('AUTH_REQUIRED','学校连接已改变，请在 App 中检查登录。');
+    }
+    if (!authenticated) { this.invalidate(); throw new AppError('AUTH_REQUIRED','学校会话已失效，请在 App 中重新连接。'); }
+    this.lastChecked = Date.now();
+    this.set('authenticated','学校会话可用。');
+  }
   async ensure() {
     if (this.status.state === 'authenticated' && Date.now()-this.lastChecked < 60_000) return;
     if(this.pending)throw new AppError('AUTH_CONNECTING','App 正在连接学校，请等待 auth_status 返回 authenticated 后重试。');

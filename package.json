@@ -10,9 +10,12 @@
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/test.mjs",
+    "test:widget": "node scripts/test-widget.mjs",
     "start": "npm run build && electron .",
     "runtime": "node scripts/runtime.mjs",
     "electron-runtime": "node scripts/electron-runtime.mjs",
+    "build:widget": "node scripts/build-widget.mjs --arch arm64",
+    "package:widget:arm64": "npm run build && npm run runtime -- arm64 && npm run build:widget && npm run electron-runtime -- arm64 && electron-builder --mac dir --arm64 --config scripts/widget-local.config.cjs --config.electronDist=runtime/electron/arm64",
     "package:arm64": "npm run build && npm run runtime -- arm64 && npm run electron-runtime -- arm64 && electron-builder --mac dmg --arm64 --config.electronDist=runtime/electron/arm64",
     "package": "npm run package:arm64"
   },

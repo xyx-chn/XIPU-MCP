@@ -6,6 +6,8 @@
 
 本指南用于部署本机 App，不需要模型 API Key。支持 Apple Silicon、macOS 13+；不支持 Intel、Windows、Linux 或云端执行器。仅能浏览网页的 AI 无法替用户操作本机。
 
+DDL 桌面小组件需 macOS 14+ 和完整 Xcode。分发以源码为准，接收者的 AI 在本机编译；本机小组件配置自动采用 ad-hoc 签名，不需要 Developer ID 证书、Team ID 或公证凭据。
+
 ## 给执行部署的 AI
 
 目标是从本仓库源码编译 ARM App，安装到当前用户的 `~/Applications/XIPU MCP.app`，配置用户选择的本机 MCP 客户端，并验证 MCP 初始化。用户要求部署即授权完成这些操作；系统或工具的权限提示遵循所在环境的规则。保持用户原有的客户端设置及其他 MCP 服务器。
@@ -24,6 +26,8 @@ cd "$HOME/XIPU-MCP"
 目标目录已经存在时，先检查远程地址及工作区修改，复用对应仓库。不要覆盖不相关目录、丢弃本地修改或强制重置。没有可用 Git 时，可以用 `curl` 下载 GitHub 的 `https://api.github.com/repos/xyx-chn/XIPU-MCP/tarball/main`，解压到新目录；安装脚本不依赖 Git、Homebrew 或预装 Node。
 
 执行前阅读本地 `scripts/install.sh`、`scripts/install-app.mjs` 和 `scripts/setup-mcp.mjs`，确认它们来自本仓库。
+
+用户要求桌面小组件时，还须阅读 `scripts/build-widget.mjs` 和 `scripts/widget-local.config.cjs`。检查完整 Xcode 已安装并由 `xcode-select -p` 选中，用户已在 Xcode 完成首次启动和许可；不要替用户接受许可、安装证书或关闭平台安全功能。缺少这些前置条件时，明确说明小组件尚未编译，不能用基础 App 安装成功代替小组件验收。
 
 从当前执行环境判断客户端，或者遵循用户明确选择：
 
@@ -44,7 +48,15 @@ Claude Code 与 Claude Desktop 是不同客户端。无法确定目标时，只�
 bash scripts/install.sh --client codex
 ```
 
+用户要求 DDL 桌面小组件时，改为执行：
+
+```sh
+bash scripts/install.sh --client codex --with-widget
+```
+
 其他客户端替换 `--client` 的值即可；`--app-dir /绝对路径` 可指定安装目录，`--no-open` 可用于不打开设置窗口的部署。默认不需要 `sudo`。
+
+基础安装保留 macOS 13 支持，不要求 Xcode；`--with-widget` 是严格的小组件模式，工具链检查或编译失败即停止，不会悄悄退回基础安装。按用户请求选择一条安装命令。
 
 脚本会：
 
@@ -54,6 +66,8 @@ bash scripts/install.sh --client codex
 - 验证 stdio 初始化、9 个工具及 `auth_status`；此检查不查询课程、不读取邮件。
 - 导出 `dist/mcp-config.json`，配置明确选择的客户端。已有配置变更前生成 `0600` 权限的备份，保留其他服务器及设置。
 - 打开 App，供用户本人完成账户配置。
+
+`--with-widget` 还会检查原生工具链、从源码编译 WidgetKit 扩展和 Node-API 桥接，使用独立本机临时签名配置构建 `dist/widget-local/mac-arm64/XIPU MCP.app`。安装器在复制前后都验证原生资源完整，再替换旧 App；安装不需要签名证书。MCP 初始化检查本身不证明小组件已经添加到桌面。
 
 安装路径中的空格必须作为单个参数传递。客户端使用 App 内 `Contents/Resources/xipu-mcp` 启动器；不要配置开发目录中的 `build/bridge.cjs` 或依赖全局 Node。配置中不需要任何学校／邮箱秘密。
 
@@ -78,9 +92,17 @@ bash scripts/install.sh --client codex
 
 登录后可调用 `list_courses` 验证用户课程；这需要用户完成学校认证。随后 AI 可查询材料、下载和 DDL。不要把未登录或接口 warnings 误报成“没有课程／DDL”。
 
-### 4. 故障与更新
+### 4. 小组件验收（使用 `--with-widget` 时）
 
-构建、校验或配置失败时保留错误状态并修复具体原因，不通过跳过测试、禁用 TLS 校验、移除隔离属性、关闭 Gatekeeper 或读取个人邮件兜底。测试包尚未 Developer ID 签名公证；学校登录、钥匙串及 macOS 安全提示由用户本人处理。
+首次打开新 App 后，在“截止时间”启用桌面小组件，再右键桌面 →“编辑小组件”，搜索“XIPU”，选择“XIPU MCP”。分别添加正方形和长方形，确认最多显示最近 2／4 项，点击能打开截止时间页及对应事项。GUI 无法由当前执行环境操作时，请明确说明原生资源已安装、仍需用户完成添加与视觉验收。
+
+主 App 同步所有课程未来 30 天的 Moodle DDL，上海时区；登录、手动刷新、每小时和唤醒时更新快照，macOS 决定桌面实际重绘时机。学校登录后执行一次手动刷新，核对 App 与桌面内容一致。测试关闭主窗口后保留后台运行；退出 App 后仅保留缓存。启用小组件默认注册登录项，用户可关闭“登录后后台运行”，应用须显示系统实际注册状态。
+
+会话过期时后台不会主动弹出登录流程，需用户在 App 登录；离线时保留最近成功数据。快照位于 `~/Library/Application Support/XIPU MCP/widgets/snapshot.json`，只包含展示信息，不能读取秘密文件或个人邮件诊断小组件。切换账户或清除凭据应清空旧快照。来源读取警告不能被当作“没有 DDL”。
+
+### 5. 故障与更新
+
+构建、校验或配置失败时保留错误状态并修复具体原因，不通过跳过测试、禁用 TLS 校验、移除隔离属性、关闭 Gatekeeper 或读取个人邮件兜底。源码本机安装无需 Developer ID 签名公证；学校登录、钥匙串及 macOS 安全提示由用户本人处理。
 
 当前用户已有 XIPU MCP App 正在运行时，即使它位于其他目录，安装器也会停止替换，避免验证到旧版后台。等待下载结束，告知用户从应用菜单退出后重试；不要强杀 App。网络错误可以重试下载，校验失败的缓存会重新下载。系统全局代理不由安装脚本修改。
 
@@ -96,4 +118,4 @@ Codex CLI 不在 PATH 时先寻找当前客户端附带或已安装的 `codex` �
 
 更新时先确认用户源码没有未提交改动，再使用正常 Git 更新流程，重新运行安装脚本。安装不会删除 App 用户数据、账户设置或课件。客户端配置备份名包含 `.xipu-backup-`；回退配置时保留更新后由用户新增的其他设置。
 
-交付给用户：实际安装路径、已配置的客户端、MCP 验证结果、是否需要重载／首次登录，以及尚未完成的步骤。
+交付给用户：实际安装路径、已配置的客户端、MCP 验证结果、是否启用了小组件及两种尺寸／刷新／点击的实际验收结果、是否需要重载／首次登录，以及尚未完成的步骤。

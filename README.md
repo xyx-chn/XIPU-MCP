@@ -10,6 +10,8 @@
 
 [skills.md](skills.md) 包含完整执行步骤；[标准 SKILL.md](skills/xipu-mcp-setup/SKILL.md) 可作为支持 Skill 的客户端入口。需要 Apple Silicon Mac、macOS 13+。脚本自动准备经过校验的 Node／npm，不需要预先安装 Node 或 Homebrew；网络需能访问 GitHub、Node 官方站和 npm。
 
+需要 DDL 桌面小组件时，在请求中加上“同时启用 DDL 桌面小组件”。小组件需要 macOS 14+ 和完整 Xcode；由接收者的 AI 在本机从源码编译并临时签名，不需要 Developer ID 证书、Apple Team ID 或公证凭据。
+
 源码部署命令（以 Codex 为例）：
 
 ```sh
@@ -18,22 +20,38 @@ cd XIPU-MCP
 bash scripts/install.sh --client codex
 ```
 
+要同时安装小组件，将最后一条安装命令换成（macOS 14+，先安装并打开完整 Xcode）：
+
+```sh
+bash scripts/install.sh --client codex --with-widget
+```
+
 可选择 `codex`、`claude-desktop`、`cursor` 或 `config-only`。默认安装到 `~/Applications/XIPU MCP.app`，无需 `sudo`；类型检查、测试和 MCP 初始化通过后完成部署。只修改所选客户端的 `xipu-mcp` 条目，保留其他设置，变更前创建私有备份。`config-only` 只导出 `dist/mcp-config.json`，其他客户端还需按其官方方法注册。
 
 首次使用请本人在 App 中配置学校账户及可选邮箱，再点击“连接学校”；不要在 AI 对话中发送密码或授权码。AI 不需要你的账号就能编译安装。客户端可能需要重载 MCP 或重启才能加载工具。
 
 ## 安装与使用
 
-1. 从 [GitHub Release](https://github.com/xyx-chn/XIPU-MCP/releases/tag/v0.1.1) 下载 Apple Silicon（M 系列 Mac）的 ARM 测试安装包，将 `XIPU MCP.app` 放入“应用程序”，打开 App。
+1. 按上方源码部署方法安装 Apple Silicon（M 系列 Mac）的 ARM App，打开 `~/Applications/XIPU MCP.app`。
 2. 在“账户与邮箱”填写学校账户。希望自动取码时，再配置邮箱服务器、认证信息、收码地址及筛选规则。
 3. 保存设置，测试邮箱连接，点击“连接学校”。自动流程未完成时会打开学校原始登录窗口，供人工操作。
-4. 在“AI 接入”生成配置，复制到支持 stdio 的 MCP 客户端。发行包内置 Node，使用者不需要开发工具。
+4. 安装器会配置所选 MCP 客户端；也可在“AI 接入”生成配置，复制到支持 stdio 的客户端。安装后的 App 内置 Node，日常使用不依赖开发目录。
 
 关闭主窗口后，App 继续运行本机桥接和下载任务；通过应用菜单退出才会停止后台服务。MCP 客户端可以自动启动已安装的 App。
 
 课程列表优先展示名称以三个大写英文字母和三个数字开头的正式课程，例如 COS305、EEE335；消息发布页保留在后面。课件同时支持 Moodle 嵌入式预览和直接文件重定向，网页／视频以可打开的链接展示。
 
-测试包未使用 Developer ID 签名公证；正式分发需要下文的签名流程。测试范围见 [TESTING.md](TESTING.md)；邮箱验证码全链路和无开发环境的另一台 Mac 验收仍待完成。个人账户的联调记录不公开上传。
+当前以源码部署为分发方式，接收者在自己的 Mac 编译安装。测试范围见 [TESTING.md](TESTING.md)；邮箱验证码全链路和另一台 Mac 验收仍待完成。个人账户的联调记录不公开上传。
+
+## DDL 桌面小组件
+
+用 `--with-widget` 安装后，先打开 App，在“截止时间”启用桌面小组件。然后右键桌面 →“编辑小组件”，搜索“XIPU”，选择“XIPU MCP”中的正方形或长方形拖到桌面。正方形显示最近 2 项，长方形显示最近 4 项；点击会打开 App 的截止时间页，长方形每行可打开对应事项。
+
+小组件读取所有 Moodle 课程未来 30 天的截止事项，按上海时区显示课程、标题、截止日期和剩余时间，跟随系统明暗及单色外观。学校登录成功、手动刷新、每小时后台同步和睡眠唤醒后更新本机快照；具体桌面重绘时间由 macOS 调度。自启动默认随小组件启用，可在“截止时间”关闭“登录后后台运行”。关闭主窗口会继续同步；从应用菜单退出会停止同步，桌面保留上次缓存。
+
+首次登录或会话过期时请在 App 完成学校认证，后台同步不会自行弹出登录窗口。离线或来源读取失败时保留上次成功数据，并显示更新时间或警告；带警告的空列表不能证明没有 DDL。快照仅包含展示所需的课程和截止事项，不包含密码、Cookie 或邮箱内容。
+
+完整 Xcode 的初次启动、许可及开发目录选择由用户完成，安装器只检查工具链。若已安装 Xcode 但检查失败，可先运行 `xcode-select -p` 核对选中的开发目录，再打开 Xcode 完成初始化；不要自动接受许可或关闭 macOS 安全功能。
 
 ## 通用 IMAP／POP3
 
@@ -87,7 +105,7 @@ DDL 默认未来 30 天，输出 ISO 时间及上海显示时区，区分作业�
 
 任务记录在异常退出后将未完成项标记为失败；重新发现材料后可重试。关闭 MCP 客户端不会取消 App 后台任务。
 
-`~/Library/Application Support/XIPU MCP/` 保存设置、加密凭据、任务记录和 IPC socket。目录权限 0700，秘密文件、token 和 socket 权限 0600。凭据和会话通过 Electron safeStorage／macOS Keychain 加密；发行包不包含个人配置或课件。
+`~/Library/Application Support/XIPU MCP/` 保存设置、加密凭据、任务记录和 IPC socket；`widgets/snapshot.json` 保存供小组件读取的 DDL 快照。目录权限 0700，秘密文件、token 和 socket 权限 0600。凭据和会话通过 Electron safeStorage／macOS Keychain 加密；源码和构建产物不包含个人配置或课件。
 
 “清除凭据与会话”停止下载并清除密码、邮箱授权码和 Cookie，保留已下载文件。不同签名／开发版可能触发新的钥匙串授权。
 
@@ -119,10 +137,18 @@ npm run package:arm64
 
 输出在 `dist/`，目前仅交付 ARM 版。使用固定 Node 22.23.3 和与 npm 锁文件对应的官方 Electron，下载后校验 SHA256；`npm run package` 构建 ARM 版。
 
-正式签名需要本机钥匙串中的 Developer ID Application 证书或安全 CI 证书注入，按 electron-builder 支持的 `CSC_NAME` 等配置构建。将 Apple 公证凭据存为钥匙串 profile 后，对已签名 DMG 执行：
+带小组件的本机编译：
+
+```sh
+npm run package:widget:arm64
+```
+
+输出在 `dist/widget-local/`。该独立配置将 WidgetKit 扩展嵌入 `Contents/PlugIns`，对扩展、桥接和 App 使用本机 ad-hoc 签名，保留 Electron JIT 权限。接收者通常直接运行 `scripts/install.sh --with-widget --client ...`，由安装器完成工具链、检查、编译、安装和 MCP 配置。
+
+如果后续提供预编译安装包，可另行配置 Developer ID 签名和公证；这不是源码部署的前置条件。正式签名使用本机钥匙串中的 Developer ID Application 证书或安全 CI 证书注入，按 electron-builder 支持的 `CSC_NAME` 等配置构建。将 Apple 公证凭据存为钥匙串 profile 后，对已签名 DMG 执行：
 
 ```sh
 XIPU_NOTARY_PROFILE=your-keychain-profile node scripts/sign.mjs "dist/已签名安装包.dmg"
 ```
 
-脚本提交公证、staple 票据并检查 Gatekeeper；不在文件中保存 Apple 密码。没有证书时只能交付测试包。
+脚本提交公证、staple 票据并检查 Gatekeeper；不在文件中保存 Apple 密码。
