@@ -4,6 +4,8 @@ import { Store } from './store.js';
 import { MailService, type Baseline } from './mail/service.js';
 import { SchoolSessionTransport } from './transport.js';
 import { checkSchoolSession } from './moodle/session-check.js';
+import { loadSchoolLoginPage, loginLoadMessage, loginFailureDocument, isLoginRedirectLoop, LOGIN_RETRY_URL } from './auth-navigation.js';
+import { resetSchoolLoginCookies } from './auth-session.js';
 
 const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 export class AuthService {
@@ -12,6 +14,8 @@ export class AuthService {
   status: AuthStatus = { state:'signed_out', message:'尚未连接学校。', checkedAt:new Date().toISOString() };
   private window?: BrowserWindow; private pending?: Promise<void>; private lastChecked = 0; private lastFailed = 0;
   private controller?: AbortController;
+  private windowLoadFailed = false;
+  private resetSessionOnRetry = false;
   private diagnostic: AuthStatus['diagnostic'];
   constructor(private store: Store, private changed: () => void) {
     this.session = session.fromPartition('xipu-private');
@@ -44,9 +48,12 @@ export class AuthService {
     if (await this.probe()) this.set('authenticated','学校会话可用。');
     else this.set(this.store.settings.username ? 'signed_out':'unconfigured','请配置账户或连接学校。');
   }
-  async persist() {
-    this.store.secrets.cookies = (await this.session.cookies.get({})).filter(c => ['core.xjtlu.edu.cn','uim.xjtlu.edu.cn','xjtlu.edu.cn'].includes((c.domain??'').replace(/^\./,'')));
+  async persist(current: () => boolean = () => true) {
+    const cookies = await this.session.cookies.get({});
+    if (!current()) return false;
+    this.store.secrets.cookies = cookies.filter(c => ['core.xjtlu.edu.cn','uim.xjtlu.edu.cn','xjtlu.edu.cn'].includes((c.domain??'').replace(/^\./,'')));
     await this.store.saveSecrets();
+    return current();
   }
   private async probe() {
     try {
@@ -77,20 +84,34 @@ export class AuthService {
     void this.connect(false).catch(()=>undefined);
     throw new AppError('AUTH_CONNECTING','已在 App 中启动学校登录，请通过 auth_status 检查进度后重试。');
   }
-  async connect(manual: boolean) {
-    if(manual&&this.window&&!this.window.isDestroyed()){this.window.show();this.window.focus();return;}
-    if (this.pending) return this.pending;
-    this.pending = this.run(manual).finally(() => { this.pending = undefined; });
-    return this.pending;
+  async connect(manual: boolean): Promise<void> {
+    if(manual&&this.window&&!this.window.isDestroyed()&&!this.windowLoadFailed){this.window.show();this.window.focus();return;}
+    if (this.pending&&!this.windowLoadFailed) return this.pending;
+    this.controller?.abort();this.window?.close();
+    const controller = new AbortController();this.controller = controller;this.windowLoadFailed = false;
+    const pending = this.run(manual,controller).finally(() => { if(this.pending===pending)this.pending = undefined; });
+    this.pending=pending;return pending;
   }
-  private async run(manual: boolean) {
-    if (await this.probe()) { this.set('authenticated','学校会话可用。'); this.lastChecked=Date.now(); return; }
-    this.controller?.abort(); this.controller = new AbortController();
-    this.window?.close();
+  private async run(manual: boolean, controller: AbortController) {
+    const isCurrent=()=>this.controller===controller&&!controller.signal.aborted;
+    const authenticated=await this.probe();
+    if(!isCurrent())return;
+    if (authenticated) { this.set('authenticated','学校会话可用。'); this.lastChecked=Date.now(); return; }
+    if(this.resetSessionOnRetry||this.diagnostic?.stage==='redirect_limit') {
+      this.set('connecting','学校登录会话发生循环跳转，正在重建本机登录会话。');
+      try {
+        await resetSchoolLoginCookies(this.session,controller.signal);
+        if(!isCurrent()||!await this.persist(isCurrent))return;
+        this.resetSessionOnRetry=false;
+      }catch{
+        if(!isCurrent())return;
+        const message='无法重建学校登录会话，请检查钥匙串后重新连接。';this.set('needs_user',message);throw new AppError('AUTH_REQUIRED',message);
+      }
+    }
     const win = new BrowserWindow({ width:1000,height:760, show:manual, title:'学校登录 · XIPU MCP', webPreferences:{ session:this.session, nodeIntegration:false, contextIsolation:true, sandbox:true,backgroundThrottling:false } });
     this.window = win;
     win.webContents.setUserAgent(this.session.getUserAgent());
-    win.on('page-title-updated',(event,title)=>{event.preventDefault();win.setTitle((title||'学校登录')+' · XIPU MCP');});
+    win.on('page-title-updated',(event,title)=>{event.preventDefault();win.setTitle((title||'学校登录').replace(/(?: · XIPU MCP)+$/,'')+' · XIPU MCP');});
     if(!app.isPackaged && process.env.XIPU_SESSION_DIAGNOSTICS==='1'){
       win.webContents.on('did-navigate',(_event,url)=>{
         if(new URL(url).origin!==CORE)return;
@@ -101,24 +122,32 @@ export class AuthService {
         })().catch(()=>undefined);
       });
     }
-    const allowed = (url: string) => { try { return [CORE,SSO].includes(new URL(url).origin); } catch { return false; } };
-    win.webContents.on('will-navigate', (event,url) => { if (!allowed(url)) { event.preventDefault(); this.set('needs_user','学校登录跳转到未知来源，已停止自动操作。'); win.show(); } });
-    win.webContents.on('will-redirect', (event,url) => { if (!allowed(url)) event.preventDefault(); });
+    const allowed = (url: string) => { try { const target=new URL(url);return !target.username&&!target.password&&[CORE,SSO].includes(target.origin); } catch { return false; } };
+    win.webContents.on('will-navigate', (event,url) => {
+      if(url===LOGIN_RETRY_URL&&this.windowLoadFailed){event.preventDefault();void this.connect(true).catch(()=>undefined);return;}
+      if (!allowed(url)) { event.preventDefault();void this.showLoadFailure(win,controller,{reason:'origin'}); }
+    });
+    win.webContents.on('will-redirect', (event,url) => { if (!allowed(url)) {event.preventDefault();void this.showLoadFailure(win,controller,{reason:'origin'});} });
     win.webContents.setWindowOpenHandler(() => ({ action:'deny' }));
-    win.webContents.on('did-fail-load', (_e, code, _description, _url, mainFrame) => { if (mainFrame && code !== -3) this.set('needs_user', `学校页面加载失败（${code}），请检查网络后重试。`); });
-    win.on('closed', () => { if (this.window === win) this.window=undefined; this.controller?.abort(); });
+    win.webContents.on('did-fail-load', (_e, code, _description, _url, mainFrame) => { if (mainFrame && code !== -3) void this.showLoadFailure(win,controller,{reason:'load_failed',errorCode:code}); });
+    win.webContents.on('render-process-gone',()=>{void this.showLoadFailure(win,controller,{reason:'renderer'});});
+    win.on('closed', () => { controller.abort();if (this.window === win) {this.window=undefined;this.windowLoadFailed=false;if(this.status.state==='connecting')this.set('signed_out','学校登录窗口已关闭，请重新连接。');} });
     this.set('connecting','正在打开 Moodle 并检查学校 SSO。');
     let baseline: Baseline | undefined; let mail: MailService | undefined;
     let submitted=false, submittedAt=0, otpSubmitted=false, sendClicked=false, attemptedMail=false;
     try {
-      await win.loadURL(CORE+'/login/index.php');
+      await loadSchoolLoginPage(win,CORE+'/login/index.php',controller.signal);
       const until = Date.now()+300_000;
       while (Date.now()<until && !win.isDestroyed()) {
-        this.controller.signal.throwIfAborted();
+        controller.signal.throwIfAborted();
+        if(!isCurrent())return;
+        if(this.windowLoadFailed)throw new AppError('AUTH_LOAD','学校页面加载失败，请在登录窗口重新加载。');
         const current = win.webContents.getURL();
         if (!allowed(current)) throw new AppError('AUTH_ORIGIN','学校登录来源不在允许列表。');
         if (new URL(current).origin === CORE && !/\/login\/|\/auth\//.test(new URL(current).pathname) && await this.probe()) {
-          this.lastChecked=Date.now(); this.lastFailed=0; await this.persist(); this.set('authenticated','已连接学校。'); win.close(); return;
+          if(controller.signal.aborted||this.controller!==controller)return;
+          if(!await this.persist(()=>this.controller===controller&&!controller.signal.aborted))return;
+          this.lastChecked=Date.now(); this.lastFailed=0; this.set('authenticated','已连接学校。'); win.close(); return;
         }
         const state = await win.webContents.executeJavaScriptInIsolatedWorld(901, [{ code:`(() => {
           const visible=e=>!!(e.offsetWidth||e.offsetHeight||e.getClientRects().length);
@@ -131,20 +160,23 @@ export class AuthService {
           return {password,otp,error,sso:link?.href??null};
         })()` }]);
         if (state.error) throw new AppError('AUTH_REJECTED','学校登录返回错误，请在登录窗口检查后手动操作。');
-        if (state.sso && new URL(current).origin===CORE) { if (!allowed(state.sso)) throw new AppError('AUTH_ORIGIN','无效的学校 SSO 地址。'); await win.loadURL(state.sso); continue; }
+        if(controller.signal.aborted||this.controller!==controller)return;
+        if (state.sso && new URL(current).origin===CORE) { if (!allowed(state.sso)) throw new AppError('AUTH_ORIGIN','无效的学校 SSO 地址。'); await loadSchoolLoginPage(win,state.sso,controller.signal); continue; }
         if (!manual && state.password && !submitted && new URL(current).origin === SSO) {
           if (!this.store.settings.username || !this.store.secrets.schoolPassword) throw new AppError('AUTH_CONFIG','请在 App 配置学校账户，或手动登录。');
           if (this.store.settings.mail.enabled && this.store.secrets.mailPassword) {
             attemptedMail=true; mail = new MailService(this.store.settings.mail,this.store.secrets.mailPassword);
-            try { baseline=await mail.baseline(); } catch { mail=undefined; this.set('connecting','邮箱连接失败；学校登录需要验证码时请手动输入。'); }
+            try { baseline=await mail.baseline(); } catch { mail=undefined;if(isCurrent())this.set('connecting','邮箱连接失败；学校登录需要验证码时请手动输入。'); }
           }
-          await this.fillPassword(win); submitted=true;submittedAt=Date.now();this.set('connecting','已提交学校登录，正在等待验证或回跳。');
+          if(controller.signal.aborted||this.controller!==controller)return;
+          await this.fillPassword(win);if(!isCurrent())return;submitted=true;submittedAt=Date.now();this.set('connecting','已提交学校登录，正在等待验证或回跳。');
         }
         if (state.otp && !otpSubmitted) {
           if (manual || !mail || !baseline) throw new AppError('OTP_MANUAL','请在学校登录窗口输入邮箱验证码。');
           if (!sendClicked) { await this.clickSendCode(win); sendClicked=true; }
           this.set('connecting','正在等待符合筛选条件的验证码邮件。');
-          const code=await mail.waitForCode(baseline,this.controller.signal);
+          const code=await mail.waitForCode(baseline,controller.signal);
+          if(controller.signal.aborted||this.controller!==controller)return;
           await this.fillOtp(win,code); otpSubmitted=true;
         }
         if (submitted && !state.otp && Date.now()-submittedAt>90_000) throw new AppError('AUTH_TIMEOUT','学校登录提交后没有明确响应，请在登录窗口手动检查。');
@@ -152,11 +184,22 @@ export class AuthService {
       }
       throw new AppError('AUTH_TIMEOUT',attemptedMail ? '登录未完成，请检查学校页面和邮箱连接。':'登录未完成，请在登录窗口检查。');
     } catch (error) {
+      if(!isCurrent()||win.isDestroyed())return;
       this.lastFailed=Date.now();
+      const url=win.webContents.getURL();
+      if(this.windowLoadFailed||!allowed(url)||(error as {reason?:string})?.reason){await this.showLoadFailure(win,controller,error);throw new AppError('AUTH_REQUIRED',this.status.message);}
       const message=error instanceof AppError ? error.message:'登录未完成，请在学校登录窗口手动检查。';
-      this.set('needs_user',message); if (!win.isDestroyed()) { win.show(); this.watchManual(win); }
+      this.set('needs_user',message); if (!win.isDestroyed()) { win.show(); this.watchManual(win,controller); }
       throw new AppError('AUTH_REQUIRED',message);
     }
+  }
+  private async showLoadFailure(win:BrowserWindow,controller:AbortController,error:unknown) {
+    if(this.controller!==controller||controller.signal.aborted||win.isDestroyed()||this.window!==win||this.windowLoadFailed)return;
+    this.windowLoadFailed=true;
+    this.lastFailed=Date.now();
+    if(isLoginRedirectLoop(error))this.resetSessionOnRetry=true;
+    const message=loginLoadMessage(error);this.set('needs_user',message);win.show();
+    try {await win.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(loginFailureDocument(message)));} catch { /* The main App also retains the safe error message. */ }
   }
   private async fillPassword(win: BrowserWindow) {
     const values=JSON.stringify({ username:this.store.settings.username, password:this.store.secrets.schoolPassword });
@@ -182,12 +225,17 @@ export class AuthService {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(code)});e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));b.click();
     })()` }]);
   }
-  private watchManual(win: BrowserWindow) {
+  private watchManual(win: BrowserWindow,controller:AbortController) {
+    const current=()=>this.window===win&&!win.isDestroyed()&&this.controller===controller&&!controller.signal.aborted&&!this.windowLoadFailed;
+    let checking=false;
     const timer=setInterval(async () => {
-      if(win.isDestroyed()) {clearInterval(timer);return;}
-      if(await this.probe()) {clearInterval(timer);try{await this.persist();this.lastChecked=Date.now();this.lastFailed=0;this.set('authenticated','已通过人工登录连接学校。');win.close();}catch{this.set('needs_user','登录已完成，但无法保存会话；请检查钥匙串。');}}
+      if(!current()) {clearInterval(timer);return;}
+      if(checking)return;checking=true;
+      try {
+        if(await this.probe()&&current()) {try{if(!await this.persist(current))return;clearInterval(timer);this.lastChecked=Date.now();this.lastFailed=0;this.set('authenticated','已通过人工登录连接学校。');win.close();}catch{if(current())this.set('needs_user','登录已完成，但无法保存会话；请检查钥匙串。');}}
+      }finally{checking=false;}
     },5000);
     timer.unref();win.once('closed',()=>clearInterval(timer));
   }
-  async clear() { this.controller?.abort();this.window?.close();await this.session.clearStorageData();await this.store.clearSecrets();this.lastChecked=0;this.lastFailed=0;this.set('signed_out','已清除凭据和学校会话。'); }
+  async clear() { this.controller?.abort();this.pending=undefined;this.resetSessionOnRetry=false;this.window?.close();await this.session.clearStorageData();await this.store.clearSecrets();this.lastChecked=0;this.lastFailed=0;this.set('signed_out','已清除凭据和学校会话。'); }
 }

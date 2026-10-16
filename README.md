@@ -30,6 +30,8 @@ bash scripts/install.sh --client codex --with-widget
 
 首次使用请本人在 App 中配置学校账户及可选邮箱，再点击“连接学校”；不要在 AI 对话中发送密码或授权码。AI 不需要你的账号就能编译安装。客户端可能需要重载 MCP 或重启才能加载工具。
 
+若学校登录会话发生循环跳转，App 会重建本机学校会话并重新打开登录页，保留已配置的账户与密码。页面加载失败时，登录窗口会显示错误提示和“重新加载”入口；无需清除全部凭据。
+
 ## 安装与使用
 
 1. 按上方源码部署方法安装 Apple Silicon（M 系列 Mac）的 ARM App，打开 `~/Applications/XIPU MCP.app`。
